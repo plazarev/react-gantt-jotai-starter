@@ -5,7 +5,7 @@ A working starter project that integrates **DHTMLX React Gantt** with **Jotai** 
 **Related tutorial**:
 [https://docs.dhtmlx.com/gantt/integrations/react/state/jotai/](https://docs.dhtmlx.com/gantt/integrations/react/state/jotai/)
 
-## What is This
+## What is DHTMLX React Gantt with Jotai Starter
 
 This starter project demonstrates how to connect **DHTMLX React Gantt** to **Jotai**, an atomic state management library for React. Instead of managing Gantt data through component-level state or a global Redux store, the demo uses Jotai atoms to hold tasks and links, with all create, update, and delete operations flowing through those atoms.
 
@@ -55,36 +55,84 @@ The key integration point is `store.ts`, which defines the Jotai atoms that both
 
 ## Code Examples
 
-**Jotai store definition** (`src/store.ts`):
+### Basic state and CRUD
+
+This example defines the core Jotai atoms: a single `ganttStateAtom` holding `tasks`, `links`, and `config` initialized with the tutorial’s `seedTasks`, `seedLinks`, and `defaultZoomLevels`, plus write-only atoms for add/update/delete that call `pushHistory` before each mutation and use the `DB_ID:` pattern for new tasks.
 
 ```ts
-// [TODO: verify — raw file access not available in this environment]
-import { atom } from "jotai";
-import { initialTasks, initialLinks } from "./seed/Seed";
+// store.ts
+import { atom } from 'jotai';
+import { seedTasks, seedLinks, defaultZoomLevels } from './seed/Seed';
 
-export const tasksAtom = atom(initialTasks);
-export const linksAtom = atom(initialLinks);
-export const zoomAtom = atom("day");
+export const ganttStateAtom = atom({
+  tasks: seedTasks,
+  links: seedLinks,
+  config: { zoom: defaultZoomLevels },
+});
+
+export const addTaskAtom = atom(null, (get, set, task) => {
+  pushHistory(get, set, get(ganttStateAtom));
+  set(ganttStateAtom, {
+    ...get(ganttStateAtom),
+    tasks: [...get(ganttStateAtom).tasks, { ...task, id: `DB_ID:${task.id}` }],
+  });
+  return { ...task, id: `DB_ID:${task.id}` };
+});
+
+export const updateTaskAtom = atom(null, (get, set, task) => {
+  pushHistory(get, set, get(ganttStateAtom));
+  set(ganttStateAtom, {
+    ...get(ganttStateAtom),
+    tasks: get(ganttStateAtom).tasks.map((t) =>
+      String(t.id) === String(task.id) ? { ...t, ...task } : t
+    ),
+  });
+});
+
+export const deleteTaskAtom = atom(null, (get, set, id) => {
+  pushHistory(get, set, get(ganttStateAtom));
+  set(ganttStateAtom, {
+    ...get(ganttStateAtom),
+    tasks: get(ganttStateAtom).tasks.filter((t) => String(t.id) !== String(id)),
+  });
+});
 ```
 
-Tasks and links are plain Jotai atoms initialized from seed data. Any component in the tree can read or update them directly — no context providers or reducers needed.
+### Undo/redo
 
-**Toolbar using Jotai to control zoom** (`src/components/Toolbar.tsx`):
+This example adds snapshot-based undo/redo: `pastAtom` and `futureAtom` store history of full `ganttState` snapshots, `pushHistory` saves a snapshot before each change, and `undoAtom`/`redoAtom` restore previous or next states by swapping whole-state objects.
 
-```tsx
-// [TODO: verify — raw file access not available in this environment]
-import { useAtom } from "jotai";
-import { zoomAtom } from "../store";
+```ts
+// store.ts (continued)
+const maxHistory = 50;
+export const pastAtom = atom([]);
+export const futureAtom = atom([]);
 
-export function Toolbar() {
-  const [zoom, setZoom] = useAtom(zoomAtom);
-  return (
-    <button onClick={() => setZoom("month")}>Month view</button>
-  );
-}
-```
+export const pushHistory = (get, set, state) => {
+  const past = [...get(pastAtom), state];
+  if (past.length > maxHistory) past.shift();
+  set(pastAtom, past);
+  set(futureAtom, []);
+};
 
-The toolbar writes directly to the `zoomAtom`. The Gantt component reads the same atom and reconfigures its time scale accordingly — no callbacks or lifted state required.
+export const undoAtom = atom(null, (get, set) => {
+  const past = get(pastAtom);
+  if (!past.length) return;
+  const previous = past[past.length - 1];
+  set(pastAtom, past.slice(0, -1));
+  set(futureAtom, [get(ganttStateAtom), ...get(futureAtom)]);
+  set(ganttStateAtom, previous);
+});
+
+export const redoAtom = atom(null, (get, set) => {
+  const future = get(futureAtom);
+  if (!future.length) return;
+  const next = future;
+  set(futureAtom, future.slice(1));
+  set(pastAtom, [...get(pastAtom), get(ganttStateAtom)]);
+  set(ganttStateAtom, next);
+});
+``` 
 
 ## Features
 
@@ -123,7 +171,6 @@ This is a starter template for exploration and prototyping. For production use:
 - [React + Jotai integration guide](https://docs.dhtmlx.com/gantt/integrations/react/state/jotai/)
 - [Jotai documentation](https://jotai.org/docs/introduction)
 - [DHTMLX Forum](https://forum.dhtmlx.com/)
-- [DHTMLX Blog](https://dhtmlx.com/blog/)
 
 ## License
 
@@ -133,7 +180,7 @@ Source code in this repo is released under the **MIT License**.
 
 **Commercial License**
 Required for proprietary or commercial applications. Includes access to PRO features, dedicated technical support, and long-term maintenance.
-[Learn more →](https://dhtmlx.com/docs/products/dhtmlxGantt/#licensing)
+[Learn more →](https://dhtmlx.com/docs/products/dhtmlxGantt-for-React/#licensing)
  
 **Try before you buy**
 A free evaluation of DHTMLX React Gantt is available — no credit card required.
